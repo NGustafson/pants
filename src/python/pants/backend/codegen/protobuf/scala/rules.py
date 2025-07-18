@@ -12,7 +12,7 @@ from pants.backend.codegen.protobuf.scala.subsystem import PluginArtifactSpec, S
 from pants.backend.codegen.protobuf.target_types import (
     ProtobufSourceField,
     ProtobufSourcesGeneratorTarget,
-    ProtobufSourceTarget,
+    ProtobufSourceTarget, ProtobufGrpcToggleField,
 )
 from pants.backend.scala.target_types import ScalaSourceField
 from pants.backend.scala.util_rules.versions import (
@@ -126,7 +126,7 @@ async def materialize_jvm_plugin(request: MaterializeJvmPluginRequest) -> Materi
 
 @rule
 async def materialize_jvm_plugins(
-    request: MaterializeJvmPluginsRequest,
+        request: MaterializeJvmPluginsRequest,
 ) -> MaterializedJvmPlugins:
     materialized_plugins = await concurrently(
         materialize_jvm_plugin(MaterializeJvmPluginRequest(plugin)) for plugin in request.plugins
@@ -140,12 +140,12 @@ async def materialize_jvm_plugins(
 
 @rule(desc="Generate Scala from Protobuf", level=LogLevel.DEBUG)
 async def generate_scala_from_protobuf(
-    request: GenerateScalaFromProtobufRequest,
-    protoc: Protoc,
-    scalapb: ScalaPBSubsystem,
-    shim_classfiles: ScalaPBShimCompiledClassfiles,
-    jdk: InternalJdk,
-    platform: Platform,
+        request: GenerateScalaFromProtobufRequest,
+        protoc: Protoc,
+        scalapb: ScalaPBSubsystem,
+        shim_classfiles: ScalaPBShimCompiledClassfiles,
+        jdk: InternalJdk,
+        platform: Platform,
 ) -> GeneratedSources:
     output_dir = "_generated_files"
     toolcp_relpath = "__toolcp"
@@ -213,6 +213,8 @@ async def generate_scala_from_protobuf(
         MergeDigests([all_sources_stripped.snapshot.digest, empty_output_dir])
     )
 
+    generate_grpc = "grpc:" if request.protocol_target.get(ProtobufGrpcToggleField).value else ""
+
     result = await fallible_to_exec_result_or_raise(
         **implicitly(
             JvmProcess(
@@ -225,7 +227,7 @@ async def generate_scala_from_protobuf(
                     "org.pantsbuild.backend.scala.scalapb.ScalaPBShim",
                     f"--protoc={os.path.join(protoc_relpath, downloaded_protoc_binary.exe)}",
                     *maybe_jvm_plugins_setup_args,
-                    f"--scala_out={output_dir}",
+                    f"--scala_out={generate_grpc}{output_dir}",
                     *maybe_jvm_plugins_output_args,
                     *target_sources_stripped.snapshot.files,
                 ],
@@ -259,8 +261,8 @@ SHIM_SCALA_VERSION = ScalaVersion.parse("2.13.7")
 # TODO(13879): Consolidate compilation of wrapper binaries to common rules.
 @rule
 async def setup_scalapb_shim_classfiles(
-    scalapb: ScalaPBSubsystem,
-    jdk: InternalJdk,
+        scalapb: ScalaPBSubsystem,
+        jdk: InternalJdk,
 ) -> ScalaPBShimCompiledClassfiles:
     dest_dir = "classfiles"
 
